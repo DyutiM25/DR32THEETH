@@ -17,7 +17,6 @@ console.log("Connected to Redis");
 
 // helpers
 const OTP_TTL = 5 * 60; // 5 minutes
-const COOKIE_NAME = process.env.COOKIE_NAME || "token";
 
 // generate OTP
 function genOtp() {
@@ -27,7 +26,7 @@ function genOtp() {
 // create JWT
 function createAccessToken(user) {
   return jwt.sign(
-    { sub: user._id.toString(), email: user.email },
+    { id: user.id, email: user.email },
     process.env.JWT_ACCESS_SECRET,
     { expiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || "1d" }
   );
@@ -61,9 +60,25 @@ export const sendOtp = async (req, res) => {
 // 2) verify OTP -> authenticate, set cookie
 export const verifyOtp = async (req, res) => {
   try {
-    const { email, otp } = req.body;
+    const {
+      email,
+      otp,
+      firstName,
+      lastName,
+      dob,
+      gender,
+      bloodGroup,
+      phone,
+      address,
+      city,
+      state,
+      zip,
+      role,
+      patientId,
+    } = req.body;
+
     if (!email || !otp)
-      return res.status(400).json({ error: "email and otp required" });
+      return res.status(400).json({ error: "Email and OTP are required" });
 
     const otpKey = `otp:${email}`;
     const stored = await redisClient.get(otpKey);
@@ -71,31 +86,65 @@ export const verifyOtp = async (req, res) => {
       return res.status(400).json({ error: "OTP expired or not found" });
     if (stored !== otp) return res.status(400).json({ error: "Invalid OTP" });
 
-    // OTP valid -> find or create user
-    // let user = await User.findOne({ email });
-    // if (!user) {
-    //   user = await User.create({ email });
-    // }
-    // create access token only
-    const demo = {
-      _id: "123",
-      email: "demo@gmail.com",
-    };
-    const accessToken = createAccessToken(demo);
+    // OTP valid -> find user
+    let user = await User.findOne({ where: { email } });
 
-    // clear OTP (single use)
+    // If user doesn't exist -> signup
+    if (!user) {
+      // Validate required signup fields
+      const missingFields = [];
+      if (!firstName) missingFields.push("firstName");
+      if (!lastName) missingFields.push("lastName");
+      if (!dob) missingFields.push("dob");
+      if (!gender) missingFields.push("gender");
+      if (!bloodGroup) missingFields.push("bloodGroup");
+      if (!phone) missingFields.push("phone");
+      if (!address) missingFields.push("address");
+      if (!city) missingFields.push("city");
+      if (!state) missingFields.push("state");
+      if (!zip) missingFields.push("zip");
+
+      if (missingFields.length > 0)
+        return res.status(400).json({
+          error: `Missing required fields for signup: ${missingFields.join(
+            ", "
+          )}`,
+        });
+
+      // Create new user
+      user = await User.create({
+        firstName,
+        lastName,
+        dob,
+        gender,
+        bloodGroup,
+        phone,
+        address,
+        city,
+        state,
+        zip,
+        email,
+        role: role || "patient",
+        patientId,
+      });
+    }
+
+    // Generate JWT
+    const accessToken = createAccessToken({ id: user.id, email: user.email });
+
+    // Clear OTP (single use)
     await redisClient.del(otpKey);
 
-    // set cookie (access token)
+    // Set cookie
     const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "strict",
-      maxAge: 1000 * 60 * 15, // 15 minutes
+      maxAge: 1000 * 60 * 60 * 24, // 1 day
     };
+    res.cookie("token", accessToken, cookieOptions);
 
-    res.cookie(COOKIE_NAME, accessToken, cookieOptions);
-    res.json({ message: "Logged in" });
+    res.json({ message: "Logged in successfully", user });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Verify failed" });
