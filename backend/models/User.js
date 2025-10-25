@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema(
   {
@@ -68,41 +67,6 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
-
-
-// Helper function to generate a unique 10-digit patient ID
-async function generateUniquePatientId() {
-    let unique = false;
-    let patientId;
-    while (!unique) {
-        patientId = Math.floor(1000000000 + Math.random() * 9000000000).toString();
-        const existing = await mongoose.models.User.findOne({ patientId });
-    if (!existing) unique = true;
-  }
-  return patientId;
-}
-
-// Pre-save hook to generate unique 10-digit patientId for patients
-userSchema.pre("save", async function (next) {
-    if (this.role === "patient" && !this.patientId) {
-        this.patientId = await generateUniquePatientId();
-    }
-    next();
-});
-
-// Pre-save hook to hash password before saving to database
-userSchema.pre("save", async function (next) {
-    // Only hash the password if it’s new or modified
-    if (!this.isModified("password")) return next();
-    
-    try {
-        const salt = await bcrypt.genSalt(10); // generate random salt
-        this.password = await bcrypt.hash(this.password, salt); // hash password
-        next();
-    } catch (error) {
-        next(error); // pass error to mongoose
-    }
-});
 
 const User = mongoose.model("User", userSchema);
 

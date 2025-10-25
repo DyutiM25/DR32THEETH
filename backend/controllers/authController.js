@@ -1,233 +1,110 @@
-import { redis } from "../lib/redis.js";
-import User from "../models/User.js";
-import bcrypt from "bcryptjs";
+import express from "express";
+import { createClient } from "redis";
+import { v4 as uuidv4 } from "uuid";
 import jwt from "jsonwebtoken";
+import User from "../models/User.js";
+import { sendOtpEmail } from "../utils/email.js";
+import dotenv from "dotenv";
 
-const generateToken = (userId) => {
-  const accessToken = jwt.sign(
-    { id: userId },
-    process.env.ACCESS_TOKEN_SECRET,
-    { expiresIn: "15m" }
+dotenv.config();
+
+const router = express.Router();
+
+// Setup Redis client
+const redisClient = createClient({ url: process.env.REDIS_URL });
+redisClient.connect().catch(console.error);
+
+// helpers
+const OTP_TTL = 5 * 60; // 5 minutes
+const COOKIE_NAME = process.env.COOKIE_NAME || "token";
+
+// generate OTP
+function genOtp() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+// create JWT
+function createAccessToken(user) {
+  return jwt.sign(
+    { sub: user._id.toString(), email: user.email },
+    process.env.JWT_ACCESS_SECRET,
+    { expiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || "15m" }
   );
+}
 
-  const refreshToken = jwt.sign(
-    { id: userId },
-    process.env.REFRESH_TOKEN_SECRET,
-    { expiresIn: "7d" }
-  );
-
-  return { accessToken, refreshToken };
-};
-
-const storeRefreshToken = async (refreshToken, userId) => {
-  // 'EX' sets expiry in seconds → 7 days
-  await redis.set(`refreshToken:${userId}`, refreshToken, "EX", 60 * 60 * 24 * 7);
-};
-
-
-const setCookies = (res, accessToken, refreshToken) => {
-  res.cookie("accessToken", accessToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
-    maxAge: 15 * 60 * 1000, //15 minutes
-  });
-  res.cookie("refreshToken", refreshToken, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
-    maxAge: 60 * 60 * 24 * 7 * 1000, //7 days
-  });
-};
-
-export const signup = async (req, res) => {
+// 1) send OTP
+export const sendOtp = async (req, res) => {
   try {
-    const {
-      firstName,
-      lastName,
-      age,
-      gender,
-      bloodGroup,
-      phone,
-      address,
-      city,
-      state,
-      zip,
-      email,
-      password,
-      role,
-    } = req.body;
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email required" });
 
-    if (!firstName || !lastName || !phone || !email || !password) {
-      return res
-        .status(400)
-        .json({ message: "Please provide all required fields" });
-    }
+    const otp = genOtp();
+    const otpKey = `otp:${email}`;
 
-    const existingUser = await User.findOne({ $or: [{ email }, { phone }] });
-    if (existingUser) {
-      return res
-        .status(400)
-        .json({
-          message: "User already exists with this email or phone number",
-        });
-    }
+    // store OTP in redis with TTL
+    await redisClient.set(otpKey, otp, { EX: OTP_TTL });
 
-    // Create new user (password auto-hashed, patientId auto-generated)
-    const newUser = await User.create({
-      firstName,
-      lastName,
-      age,
-      gender,
-      bloodGroup,
-      phone,
-      address,
-      city,
-      state,
-      zip,
-      email,
-      password, // model hook hashes it
-      role: role || "patient",
-    });
+    const requestId = uuidv4();
+    await redisClient.set(`otpreq:${requestId}`, email, { EX: OTP_TTL });
 
-    //Generate tokens
-    const { accessToken, refreshToken } = generateToken(newUser._id);
-    await storeRefreshToken(refreshToken, newUser._id);
-    setCookies(res, accessToken, refreshToken);
+    // send email
+    await sendOtpEmail(email, otp);
 
-    res.status(201).json({
-      message: "User registered successfully",
-      user: {
-        firstName: newUser.firstName,
-        lastName: newUser.lastName,
-        email: newUser.email,
-        role: newUser.role,
-        patientId: newUser.patientId,
-        _id: newUser._id,
-      },
-      accessToken,
-      refreshToken,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error in signing up" });
+    res.json({ message: "OTP sent", requestId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to send OTP" });
   }
 };
 
-export const login = async (req, res) => {
+// 2) verify OTP -> authenticate, set cookie
+export const verifyOtp = async (req, res) => {
   try {
-    const { identifier, password } = req.body;
+    const { email, otp } = req.body;
+    if (!email || !otp)
+      return res.status(400).json({ error: "email and otp required" });
 
-    if (!identifier || !password)
-      return res
-        .status(400)
-        .json({ message: "Please provide an email or patientId and password" });
+    const otpKey = `otp:${email}`;
+    const stored = await redisClient.get(otpKey);
+    if (!stored)
+      return res.status(400).json({ error: "OTP expired or not found" });
+    if (stored !== otp) return res.status(400).json({ error: "Invalid OTP" });
 
-    let user = null;
-    if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
-      user = await User.findOne({ email: identifier });
-    } else if (/^[0-9]{10}$/.test(identifier)) {
-      user = await User.findOne({ patientId: identifier });
+    // OTP valid -> find or create user
+    let user = await User.findOne({ email });
+    if (!user) {
+      user = await User.create({ email });
     }
 
-    if (!user) return res.status(400).json({ message: "Invalid credentials" });
+    // create access token only
+    const accessToken = createAccessToken(user);
 
-    const isPasswordCorrect = await bcrypt.compare(password, user.password);
-    if (!isPasswordCorrect)
-      return res.status(400).json({ message: "Invalid credentials" });
+    // clear OTP (single use)
+    await redisClient.del(otpKey);
 
-    const { accessToken, refreshToken } = generateToken(user._id);
-    await storeRefreshToken(refreshToken, user._id);
-    setCookies(res, accessToken, refreshToken);
-
-    res.status(200).json({
-      message: "Login successful",
-      user: {
-        firstName: user.firstName,
-        lastName: user.lastName,
-        email: user.email,
-        role: user.role,
-        patientId: user.patientId,
-        _id: user._id,
-      },
-      accessToken,
-      refreshToken,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error in logging in" });
-  }
-};
-
-export const logout = async (req, res) => {
-  try {
-    const refreshToken = req.cookies.refreshToken;
-    if (refreshToken) {
-      const decoded = jwt.verify(
-        refreshToken,
-        process.env.REFRESH_TOKEN_SECRET
-      );
-      await redis.del(`refreshToken:${decoded.id}`);
-    }
-    res.clearCookie("accessToken");
-    res.clearCookie("refreshToken");
-    res.status(200).json({ message: "Logged out successfully" });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error in logging out" });
-  }
-};
-
-export const refreshTokens = async (req, res) => {
-  try {
-    const refreshToken = req.cookies.refreshToken;
-    if (!refreshToken) {
-      return res.status(401).json({ message: "No refresh token provided" });
-    }
-
-    const decoded = jwt.verify(refreshToken, process.env.REFRESH_TOKEN_SECRET);
-    const storedToken = await redis.get(`refreshToken:${decoded.id}`);
-
-    if (storedToken !== refreshToken) {
-      return res.status(403).json({ message: "Invalid refresh token" });
-    }
-
-    const accessToken = jwt.sign(
-      { id: decoded.id },
-      process.env.ACCESS_TOKEN_SECRET,
-      { expiresIn: "15m" }
-    );
-
-    res.cookie("accessToken", accessToken, {
+    // set cookie (access token)
+    const cookieOptions = {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
-      maxAge: 15 * 60 * 1000, //15 minutes
-    });
+      sameSite: "strict",
+      maxAge: 1000 * 60 * 15, // 15 minutes
+    };
 
-    res
-      .status(200)
-      .json({ message: "Tokens refreshed successfully", accessToken });
-  } catch (error) {
-    console.error("Error in refreshing tokens", error);
-    res
-      .status(500)
-      .json({
-        message: "Invalid or expired refresh token",
-        error: error.message,
-      });
+    res.cookie(COOKIE_NAME, accessToken, cookieOptions);
+    res.json({ message: "Logged in" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Verify failed" });
   }
 };
 
-export const getUserProfile = async (req, res) => {
+// 3) logout
+export const logout = async (req, res) => {
   try {
-    const user = await User.findById(req.user.id).select("-password");
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    res.status(200).json(user);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Error in getting user profile" });
+    res.clearCookie(process.env.COOKIE_NAME || "token");
+    res.json({ message: "Logged out" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Logout failed" });
   }
 };
