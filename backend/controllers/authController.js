@@ -1,4 +1,3 @@
-import express from "express";
 import { createClient } from "redis";
 import { v4 as uuidv4 } from "uuid";
 import jwt from "jsonwebtoken";
@@ -8,11 +7,13 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const router = express.Router();
-
 // Setup Redis client
-const redisClient = createClient({ url: process.env.REDIS_URL });
-redisClient.connect().catch(console.error);
+const redisClient = createClient({ url: "redis://localhost:6379" });
+redisClient.on("error", (err) => console.error("Redis Client Error:", err));
+
+await redisClient.connect();
+
+console.log("Connected to Redis");
 
 // helpers
 const OTP_TTL = 5 * 60; // 5 minutes
@@ -28,7 +29,7 @@ function createAccessToken(user) {
   return jwt.sign(
     { sub: user._id.toString(), email: user.email },
     process.env.JWT_ACCESS_SECRET,
-    { expiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || "15m" }
+    { expiresIn: process.env.ACCESS_TOKEN_EXPIRES_IN || "1d" }
   );
 }
 
@@ -71,13 +72,16 @@ export const verifyOtp = async (req, res) => {
     if (stored !== otp) return res.status(400).json({ error: "Invalid OTP" });
 
     // OTP valid -> find or create user
-    let user = await User.findOne({ email });
-    if (!user) {
-      user = await User.create({ email });
-    }
-
+    // let user = await User.findOne({ email });
+    // if (!user) {
+    //   user = await User.create({ email });
+    // }
     // create access token only
-    const accessToken = createAccessToken(user);
+    const demo = {
+      _id: "123",
+      email: "demo@gmail.com",
+    };
+    const accessToken = createAccessToken(demo);
 
     // clear OTP (single use)
     await redisClient.del(otpKey);
