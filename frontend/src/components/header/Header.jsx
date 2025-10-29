@@ -1,7 +1,7 @@
 const Header = () => {
   return (
     <header className="bg-white top-0 mt-0 z-10">
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-6 sm:gap-8 lg:gap-80 px-4 py-4 h-40 overflow-hidden">
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-6 md:gap-8 lg:gap-12 px-4 py-4 h-auto sm:h-32 md:h-40 overflow-hidden">
         <a href="#">
           <img
             src="../src/assets/images/header-1.png"

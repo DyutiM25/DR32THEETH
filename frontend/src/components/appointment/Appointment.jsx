@@ -10,15 +10,15 @@ const Appointment = () => {
   };
 
   return (
-    <div className="px-6 md:px-12 py-12 text-center bg-yellow-50">
-      <h3 className="text-4xl md:text-5xl font-extrabold leading-tight bg-gradient-to-r from-teal-400 to-orange-400 text-transparent bg-clip-text">
+    <div className="px-4 sm:px-6 md:px-12 py-8 md:py-12 text-center bg-yellow-50">
+      <h3 className="text-3xl sm:text-4xl md:text-5xl font-extrabold leading-tight bg-gradient-to-r from-teal-400 to-orange-400 text-transparent bg-clip-text">
         Book your Appointment Now!
       </h3>
-      <h4 className="text-lg text-gray-600 mt-4">
+      <h4 className="text-base sm:text-lg text-gray-600 mt-4">
         We are here to transform your smile. Book your appointment now!
       </h4>
 
-      <div className="mt-10 space-y-6 max-w-md mx-auto text-left">
+      <div className="mt-8 md:mt-10 space-y-4 md:space-y-6 max-w-md mx-auto px-4 text-left">
         <input
           type="text"
           placeholder="Enter your name..."

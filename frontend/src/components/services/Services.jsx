@@ -18,16 +18,16 @@ const Services = () => {
   return (
     <section
       id="services"
-      className="px-6 md:px-12 py-12 text-center bg-gray-50 min-h-[90vh] flex flex-col justify-center"
+      className="px-4 sm:px-6 md:px-12 py-8 md:py-12 text-center bg-gray-50 min-h-[90vh] flex flex-col justify-center"
     >
-      <h3 className="text-4xl md:text-5xl font-extrabold leading-tight bg-gradient-to-r from-teal-400 to-orange-400 text-transparent bg-clip-text mb-4">
+      <h3 className="text-3xl sm:text-4xl md:text-5xl font-extrabold leading-tight bg-gradient-to-r from-teal-400 to-orange-400 text-transparent bg-clip-text mb-2 md:mb-4">
         Our Services
       </h3>
-      <h4 className="text-lg text-gray-600 mb-12">
+      <h4 className="text-base sm:text-lg text-gray-600 mb-8 md:mb-12">
         Led by Expertise, Driven by Care.
       </h4>
 
-      <div>
+      <div className="mx-auto w-full max-w-7xl">
         <ImageSlider
           data={ServicesData}
           slidesToShow={3}

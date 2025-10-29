@@ -7,7 +7,7 @@ function SampleNextArrow(props) {
   const { className, style, onClick } = props;
   return (
     <div
-      className={className}
+      className={`${className} hidden sm:flex`}
       style={{
         ...style,
         display: "flex",
@@ -18,7 +18,7 @@ function SampleNextArrow(props) {
         width: "40px",
         height: "40px",
         zIndex: 10,
-        right: "-30px",
+        right: "-20px",
       }}
       onClick={onClick}
     />
@@ -29,7 +29,7 @@ function SamplePrevArrow(props) {
   const { className, style, onClick } = props;
   return (
     <div
-      className={className}
+      className={`${className} hidden sm:flex`}
       style={{
         ...style,
         display: "flex",
@@ -40,7 +40,7 @@ function SamplePrevArrow(props) {
         width: "40px",
         height: "40px",
         zIndex: 10,
-        left: "-30px",
+        left: "-20px",
       }}
       onClick={onClick}
     />
@@ -64,7 +64,7 @@ const ImageSlider = ({
     speed: 500,
     slidesToShow,
     slidesToScroll,
-    autoplay, // ✅ Now this won't throw an error
+    autoplay, 
     autoplaySpeed,
     pauseOnHover: true,
     nextArrow: <SampleNextArrow />,
@@ -76,9 +76,17 @@ const ImageSlider = ({
     }),
     responsive: [
       {
+        breakpoint: 1024,
+        settings: {
+          slidesToShow: 2,
+          slidesToScroll: 1,
+        },
+      },
+      {
         breakpoint: 768,
         settings: {
           slidesToShow: 1,
+          slidesToScroll: 1,
         },
       },
     ],
